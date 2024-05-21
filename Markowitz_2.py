@@ -55,17 +55,19 @@ class MyPortfolio:
     NOTE: You can modify the initialization function
     """
 
-    def __init__(self, price, exclude, lookback=50, gamma=0):
+    def __init__(self, price, exclude, lookback=15, gamma=0.3):
         self.price = price
         self.returns = price.pct_change().fillna(0)
         self.exclude = exclude
-        self.lookback = lookback
-        self.gamma = gamma
+        self.period = len(price)
+        self.lookback = 15
+        self.gamma = 0.3
 
     def calculate_weights(self):
         # Get the assets by excluding the specified column
         assets = self.price.columns[self.price.columns != self.exclude]
-
+        market_price=self.price.sum(axis=1)
+        market_returns=market_price.pct_change().fillna(0)
         # Calculate the portfolio weights
         self.portfolio_weights = pd.DataFrame(
             index=self.price.index, columns=self.price.columns
@@ -74,13 +76,73 @@ class MyPortfolio:
         """
         TODO: Complete Task 4 Below
         """
-
+        for i in range(self.lookback + 1, len(self.price)):
+            R_n = self.returns.copy()[assets].iloc[i - self.lookback : i]
+            self.portfolio_weights.loc[self.price.index[i], assets] = self.mv_opt(
+                R_n, self.gamma
+            )
+            
+            if(market_returns[self.price.index[i-1]]<0.001):
+                max_returns_asset = self.returns.loc[self.price.index[i-1],assets].idxmax()
+                self.portfolio_weights.loc[self.price.index[i],assets]=0
+                self.portfolio_weights.loc[self.price.index[i],max_returns_asset]=1
+            
         """
         TODO: Complete Task 4 Above
         """
 
         self.portfolio_weights.ffill(inplace=True)
         self.portfolio_weights.fillna(0, inplace=True)
+        ##self.portfolio_weights.to_csv("./output.csv")
+
+    def mv_opt(self, R_n, gamma):
+        Sigma = R_n.cov().values
+        mu = R_n.mean().values
+        n = len(R_n.columns)
+
+        with gp.Env(empty=True) as env:
+            env.setParam("OutputFlag", 0)
+            env.setParam("DualReductions", 0)
+            env.start()
+            with gp.Model(env=env, name="portfolio") as model:
+                """
+                TODO: Complete Task 3 Below
+                """
+                w = model.addMVar(n, lb=0, ub=1, name="w")
+
+                # Set the objective: max w.T * mu - (gamma/2) * w.T * Sigma * w
+                obj = w @ mu - (gamma / 2) * (w @ Sigma @ w)
+                model.setObjective(obj, gp.GRB.MAXIMIZE)
+
+                # Add constraints: sum(w) == 1
+                model.addConstr(w.sum() == 1, "budget")
+
+                """
+                TODO: Complete Task 3 Below
+                """
+                model.optimize()
+
+                # Check if the status is INF_OR_UNBD (code 4)
+                if model.status == gp.GRB.INF_OR_UNBD:
+                    print(
+                        "Model status is INF_OR_UNBD. Reoptimizing with DualReductions set to 0."
+                    )
+                elif model.status == gp.GRB.INFEASIBLE:
+                    # Handle infeasible model
+                    print("Model is infeasible.")
+                elif model.status == gp.GRB.INF_OR_UNBD:
+                    # Handle infeasible or unbounded model
+                    print("Model is infeasible or unbounded.")
+
+                if model.status == gp.GRB.OPTIMAL or model.status == gp.GRB.SUBOPTIMAL:
+                    # Extract the solution
+                    solution = []
+                    for i in range(n):
+                        var = model.getVarByName(f"w[{i}]")
+                        # print(f"w {i} = {var.X}")
+                        solution.append(var.X)
+
+        return solution
 
     def calculate_portfolio_returns(self):
         # Ensure weights are calculated

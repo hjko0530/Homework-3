@@ -61,13 +61,13 @@ class EqualWeightPortfolio:
     def calculate_weights(self):
         # Get the assets by excluding the specified column
         assets = df.columns[df.columns != self.exclude]
-        self.portfolio_weights = pd.DataFrame(index=df.index, columns=df.columns)
-
         """
         TODO: Complete Task 1 Below
         """
-
-        """
+        eq_weights = 1/len(assets)
+        self.portfolio_weights = pd.DataFrame(eq_weights,index=df.index, columns=df.columns)
+        self.portfolio_weights[self.exclude] = 0
+        """ 
         TODO: Complete Task 1 Above
         """
         self.portfolio_weights.ffill(inplace=True)
@@ -110,18 +110,26 @@ class RiskParityPortfolio:
     def calculate_weights(self):
         # Get the assets by excluding the specified column
         assets = df.columns[df.columns != self.exclude]
-
+        num_assets = len(assets)
         # Calculate the portfolio weights
         self.portfolio_weights = pd.DataFrame(index=df.index, columns=df.columns)
 
         """
         TODO: Complete Task 2 Below
         """
-
+        
+        rolling_std = df_returns[assets].rolling(window=self.lookback).std(ddof=0).shift(1)
+        reciprocal_of_rolling_std =1/rolling_std
+        reciprocal_of_rolling_std[self.exclude] = 0.0
+        reciprocal_of_rolling_std[1:self.lookback+1]=0
+        sum_of_rolling_std=reciprocal_of_rolling_std.sum(axis=1)
+        risk_parity_weights = reciprocal_of_rolling_std.div(sum_of_rolling_std, axis=0)
+        for asset in assets:
+            self.portfolio_weights[asset]=risk_parity_weights[asset]
+        
         """
-        TODO: Complete Task 2 Above
+        ##TODO: Complete Task 2 Above
         """
-
         self.portfolio_weights.ffill(inplace=True)
         self.portfolio_weights.fillna(0, inplace=True)
 
@@ -175,6 +183,7 @@ class MeanVariancePortfolio:
 
         self.portfolio_weights.ffill(inplace=True)
         self.portfolio_weights.fillna(0, inplace=True)
+        ##self.portfolio_weights.to_csv("./output1.csv")
 
     def mv_opt(self, R_n, gamma):
         Sigma = R_n.cov().values
@@ -189,11 +198,14 @@ class MeanVariancePortfolio:
                 """
                 TODO: Complete Task 3 Below
                 """
+                w = model.addMVar(n, lb=0, ub=1, name="w")
 
-                # Sample Code: Initialize Decision w and the Objective
-                # NOTE: You can modify the following code
-                w = model.addMVar(n, name="w", ub=1)
-                model.setObjective(w.sum(), gp.GRB.MAXIMIZE)
+                # Set the objective: max w.T * mu - (gamma/2) * w.T * Sigma * w
+                obj = w @ mu - (gamma / 2) * (w @ Sigma @ w)
+                model.setObjective(obj, gp.GRB.MAXIMIZE)
+
+                # Add constraints: sum(w) == 1
+                model.addConstr(w.sum() == 1, "budget")
 
                 """
                 TODO: Complete Task 3 Below
